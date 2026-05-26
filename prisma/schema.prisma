@@ -1,13 +1,395 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [vector]
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum DealStage {
+  new
+  ingesting
+  ready
+  under_review
+  archived
+}
+
+enum DocumentType {
+  pdf
+  docx
+  txt
+  pptx
+  xlsx
+  csv
+  other
+}
+
+enum DocumentStatus {
+  uploaded
+  extracting
+  chunked
+  embedded
+  failed
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+enum MemoStatus {
+  draft
+  review_required
+  approved
+  exported
+}
+
+enum CheckStatus {
+  found
+  partially_found
+  missing
+  contradicted
+  needs_review
+}
+
+enum JobType {
+  document_ingest
+  web_enrich
+  generate_memo
+  generate_followups
+  reprocess_document
+  score_checklist
+}
+
+enum JobStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum CitationSourceKind {
+  document_chunk
+  web_chunk
+  document_page
+  web_page
+}
+
+enum FollowupGroup {
+  team_hiring
+  product_roadmap
+  revenue_customers
+  legal_compliance
+  fundraise_captable
+}
+
+enum WebSourceType {
+  homepage
+  pricing
+  about
+  contact
+  blog
+  linkedin
+  competitor
+  other
+}
+
+enum WebSourceStatus {
+  queued
+  fetched
+  parsed
+  failed
+  stale
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id            String       @id @default(cuid())
+  name          String?
+  email         String?      @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  memberships   Membership[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  memberships Membership[]
+  deals       Deal[]
+  usageEvents UsageEvent[]
+  createdAt   DateTime     @default(now())
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String       @default("member")
+  user           User         @relation(fields: [userId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+}
+
+model Deal {
+  id                String             @id @default(cuid())
+  organizationId    String
+  name              String
+  startupName       String
+  website           String?
+  stage             DealStage          @default(new)
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  documents         Document[]
+  webSources        WebSource[]
+  notes             DealNote[]
+  qaSessions        QASession[]
+  memos             Memo[]
+  followupQuestions FollowupQuestion[]
+  diligenceChecks   DiligenceCheck[]
+  jobs              Job[]
+  usageEvents       UsageEvent[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([organizationId, createdAt])
+}
+
+model Document {
+  id         String         @id @default(cuid())
+  dealId     String
+  fileName   String
+  fileType   DocumentType
+  fileSize   Int
+  storageKey String
+  status     DocumentStatus @default(uploaded)
+  deal       Deal           @relation(fields: [dealId], references: [id])
+  chunks     DocumentChunk[]
+  jobs       Job[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([dealId, status])
+}
+
+model DocumentChunk {
+  id           String    @id @default(cuid())
+  documentId   String
+  dealId       String
+  content      String    @db.Text
+  pageNumber   Int?
+  sectionLabel String?
+  chunkIndex   Int
+  embedding    Unsupported("vector(1536)")?
+  document     Document  @relation(fields: [documentId], references: [id])
+  citations    Citation[]
+  createdAt    DateTime  @default(now())
+
+  @@index([dealId])
+  @@index([documentId])
+}
+
+model WebSource {
+  id         String          @id @default(cuid())
+  dealId     String
+  url        String
+  sourceType WebSourceType
+  status     WebSourceStatus @default(queued)
+  fetchedAt  DateTime?
+  deal       Deal            @relation(fields: [dealId], references: [id])
+  chunks     WebChunk[]
+  createdAt  DateTime        @default(now())
+
+  @@index([dealId, sourceType])
+}
+
+model WebChunk {
+  id          String     @id @default(cuid())
+  webSourceId String
+  dealId      String
+  content     String     @db.Text
+  chunkIndex  Int
+  embedding   Unsupported("vector(1536)")?
+  webSource   WebSource  @relation(fields: [webSourceId], references: [id])
+  citations   Citation[]
+  createdAt   DateTime   @default(now())
+
+  @@index([dealId])
+  @@index([webSourceId])
+}
+
+model DealNote {
+  id        String   @id @default(cuid())
+  dealId    String
+  content   String   @db.Text
+  deal      Deal     @relation(fields: [dealId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model QASession {
+  id        String    @id @default(cuid())
+  dealId    String
+  title     String?
+  deal      Deal      @relation(fields: [dealId], references: [id])
+  messages  Message[]
+  createdAt DateTime  @default(now())
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  sessionId String
+  role      MessageRole
+  content   String      @db.Text
+  session   QASession   @relation(fields: [sessionId], references: [id])
+  citations Citation[]
+  createdAt DateTime    @default(now())
+}
+
+model Memo {
+  id        String        @id @default(cuid())
+  dealId    String
+  version   Int           @default(1)
+  status    MemoStatus    @default(draft)
+  deal      Deal          @relation(fields: [dealId], references: [id])
+  sections  MemoSection[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model MemoSection {
+  id            String    @id @default(cuid())
+  memoId        String
+  sectionKey    String
+  generatedText String    @db.Text
+  editedText    String?   @db.Text
+  approved      Boolean   @default(false)
+  editorId      String?
+  memo          Memo      @relation(fields: [memoId], references: [id])
+  citations     Citation[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model FollowupQuestion {
+  id        String        @id @default(cuid())
+  dealId    String
+  group     FollowupGroup
+  question  String        @db.Text
+  rationale String?       @db.Text
+  deal      Deal          @relation(fields: [dealId], references: [id])
+  createdAt DateTime      @default(now())
+}
+
+model DiligenceCheck {
+  id         String      @id @default(cuid())
+  dealId     String
+  category   String
+  itemKey    String
+  status     CheckStatus @default(missing)
+  confidence Float?
+  rationale  String?     @db.Text
+  deal       Deal        @relation(fields: [dealId], references: [id])
+  citations  Citation[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([dealId, category, status])
+}
+
+model Citation {
+  id               String             @id @default(cuid())
+  sourceKind       CitationSourceKind
+  sourceId         String
+  excerpt          String             @db.Text
+  pageLabel        String?
+  sectionLabel     String?
+  messageId        String?
+  memoSectionId    String?
+  diligenceCheckId String?
+  documentChunkId  String?
+  webChunkId       String?
+  message          Message?        @relation(fields: [messageId], references: [id])
+  memoSection      MemoSection?    @relation(fields: [memoSectionId], references: [id])
+  diligenceCheck   DiligenceCheck? @relation(fields: [diligenceCheckId], references: [id])
+  documentChunk    DocumentChunk?  @relation(fields: [documentChunkId], references: [id])
+  webChunk         WebChunk?       @relation(fields: [webChunkId], references: [id])
+  createdAt        DateTime        @default(now())
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  dealId      String
+  documentId  String?
+  type        JobType
+  status      JobStatus @default(queued)
+  attempts    Int       @default(0)
+  errorMsg    String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  deal        Deal      @relation(fields: [dealId], references: [id])
+  document    Document? @relation(fields: [documentId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([dealId, type, status])
+}
+
+model UsageEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  dealId         String?
+  eventType      String
+  quantity       Int
+  metadata       Json?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  deal           Deal?        @relation(fields: [dealId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
 }
