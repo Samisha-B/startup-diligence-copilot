@@ -1,15 +1,16 @@
+// prisma/schema.prisma
+
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  extensions = [vector]
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
-
+// ─── ENUMS ────────────────────────────────────────────────
 enum DealStage {
   new
   ingesting
@@ -34,6 +35,14 @@ enum DocumentStatus {
   chunked
   embedded
   failed
+}
+
+enum WebSourceStatus {
+  queued
+  fetched
+  parsed
+  failed
+  stale
 }
 
 enum MessageRole {
@@ -77,8 +86,6 @@ enum JobStatus {
 enum CitationSourceKind {
   document_chunk
   web_chunk
-  document_page
-  web_page
 }
 
 enum FollowupGroup {
@@ -89,38 +96,18 @@ enum FollowupGroup {
   fundraise_captable
 }
 
-enum WebSourceType {
-  homepage
-  pricing
-  about
-  contact
-  blog
-  linkedin
-  competitor
-  other
-}
-
-enum WebSourceStatus {
-  queued
-  fetched
-  parsed
-  failed
-  stale
-}
-
-// ─── Models ───────────────────────────────────────────────────────────────────
+// ─── MODELS ───────────────────────────────────────────────
 
 model User {
   id            String       @id @default(cuid())
+  email         String       @unique
   name          String?
-  email         String?      @unique
-  emailVerified DateTime?
   image         String?
-  accounts      Account[]
-  sessions      Session[]
-  memberships   Membership[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+  memberships   Membership[]
+  sessions      Session[]
+  accounts      Account[]
 }
 
 model Account {
@@ -137,7 +124,6 @@ model Account {
   id_token          String? @db.Text
   session_state     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([provider, providerAccountId])
 }
 
@@ -153,67 +139,71 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
-
   @@unique([identifier, token])
 }
 
 model Organization {
   id          String       @id @default(cuid())
   name        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   memberships Membership[]
   deals       Deal[]
   usageEvents UsageEvent[]
-  createdAt   DateTime     @default(now())
 }
 
 model Membership {
   id             String       @id @default(cuid())
   userId         String
   organizationId String
-  role           String       @default("member")
+  role           String       @default("member") // "owner" | "member"
+  createdAt      DateTime     @default(now())
   user           User         @relation(fields: [userId], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id])
-  createdAt      DateTime     @default(now())
-
   @@unique([userId, organizationId])
 }
 
 model Deal {
-  id                String             @id @default(cuid())
-  organizationId    String
-  name              String
-  startupName       String
-  website           String?
-  stage             DealStage          @default(new)
-  organization      Organization       @relation(fields: [organizationId], references: [id])
-  documents         Document[]
-  webSources        WebSource[]
-  notes             DealNote[]
-  qaSessions        QASession[]
-  memos             Memo[]
+  id               String             @id @default(cuid())
+  organizationId   String
+  name             String
+  startupName      String
+  website          String?
+  linkedinUrl      String?
+  notes            String?            @db.Text
+  stage            DealStage          @default(new)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  organization     Organization       @relation(fields: [organizationId], references: [id])
+  documents        Document[]
+  webSources       WebSource[]
+  dealNotes        DealNote[]
+  qaSessions       QASession[]
+  memos            Memo[]
   followupQuestions FollowupQuestion[]
-  diligenceChecks   DiligenceCheck[]
-  jobs              Job[]
-  usageEvents       UsageEvent[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  diligenceChecks  DiligenceCheck[]
+  jobs             Job[]
+  usageEvents      UsageEvent[]
 
   @@index([organizationId, createdAt])
 }
 
 model Document {
-  id         String         @id @default(cuid())
-  dealId     String
-  fileName   String
-  fileType   DocumentType
-  fileSize   Int
-  storageKey String
-  status     DocumentStatus @default(uploaded)
-  deal       Deal           @relation(fields: [dealId], references: [id])
-  chunks     DocumentChunk[]
-  jobs       Job[]
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  id          String         @id @default(cuid())
+  dealId      String
+  name        String
+  type        DocumentType
+  status      DocumentStatus @default(uploaded)
+  sizeBytes   Int?
+  storageKey  String?        // null in free mode (we don't store binary)
+  extractedAt DateTime?
+  error       String?        @db.Text
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deal        Deal           @relation(fields: [dealId], references: [id])
+  chunks      DocumentChunk[]
+  citations   Citation[]
+  jobs        Job[]
 
   @@index([dealId, status])
 }
@@ -222,43 +212,48 @@ model DocumentChunk {
   id           String    @id @default(cuid())
   documentId   String
   dealId       String
-  content      String    @db.Text
+  text         String    @db.Text
   pageNumber   Int?
   sectionLabel String?
   chunkIndex   Int
-  embedding    Unsupported("vector(1536)")?
+  // embedding stored as raw float array — use pgvector raw SQL for similarity search
+  embedding    Bytes?
+  createdAt    DateTime  @default(now())
   document     Document  @relation(fields: [documentId], references: [id])
   citations    Citation[]
-  createdAt    DateTime  @default(now())
 
   @@index([dealId])
   @@index([documentId])
 }
 
 model WebSource {
-  id         String          @id @default(cuid())
-  dealId     String
-  url        String
-  sourceType WebSourceType
-  status     WebSourceStatus @default(queued)
-  fetchedAt  DateTime?
-  deal       Deal            @relation(fields: [dealId], references: [id])
-  chunks     WebChunk[]
-  createdAt  DateTime        @default(now())
+  id          String          @id @default(cuid())
+  dealId      String
+  url         String
+  sourceType  String          // homepage, about, pricing, etc.
+  status      WebSourceStatus @default(queued)
+  fetchedAt   DateTime?
+  error       String?         @db.Text
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deal        Deal            @relation(fields: [dealId], references: [id])
+  chunks      WebChunk[]
 
   @@index([dealId, sourceType])
 }
 
 model WebChunk {
-  id          String     @id @default(cuid())
-  webSourceId String
-  dealId      String
-  content     String     @db.Text
-  chunkIndex  Int
-  embedding   Unsupported("vector(1536)")?
-  webSource   WebSource  @relation(fields: [webSourceId], references: [id])
-  citations   Citation[]
-  createdAt   DateTime   @default(now())
+  id           String    @id @default(cuid())
+  webSourceId  String
+  dealId       String
+  text         String    @db.Text
+  url          String
+  sectionLabel String?
+  chunkIndex   Int
+  embedding    Bytes?
+  createdAt    DateTime  @default(now())
+  webSource    WebSource @relation(fields: [webSourceId], references: [id])
+  citations    Citation[]
 
   @@index([dealId])
   @@index([webSourceId])
@@ -268,53 +263,53 @@ model DealNote {
   id        String   @id @default(cuid())
   dealId    String
   content   String   @db.Text
-  deal      Deal     @relation(fields: [dealId], references: [id])
   createdAt DateTime @default(now())
+  deal      Deal     @relation(fields: [dealId], references: [id])
 }
 
 model QASession {
   id        String    @id @default(cuid())
   dealId    String
   title     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deal      Deal      @relation(fields: [dealId], references: [id])
   messages  Message[]
-  createdAt DateTime  @default(now())
 }
 
 model Message {
-  id        String      @id @default(cuid())
-  sessionId String
-  role      MessageRole
-  content   String      @db.Text
-  session   QASession   @relation(fields: [sessionId], references: [id])
-  citations Citation[]
-  createdAt DateTime    @default(now())
+  id          String      @id @default(cuid())
+  sessionId   String
+  role        MessageRole
+  content     String      @db.Text
+  createdAt   DateTime    @default(now())
+  session     QASession   @relation(fields: [sessionId], references: [id])
+  citations   Citation[]
 }
 
 model Memo {
-  id        String        @id @default(cuid())
+  id        String      @id @default(cuid())
   dealId    String
-  version   Int           @default(1)
-  status    MemoStatus    @default(draft)
-  deal      Deal          @relation(fields: [dealId], references: [id])
+  version   Int         @default(1)
+  status    MemoStatus  @default(draft)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  deal      Deal        @relation(fields: [dealId], references: [id])
   sections  MemoSection[]
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
 }
 
 model MemoSection {
-  id            String   @id @default(cuid())
-  memoId        String
-  sectionKey    String   // e.g. "team", "traction", "risks"
-  generatedText String   @db.Text
-  editedText    String?  @db.Text
-  approved      Boolean  @default(false)
-  editorId      String?
-  memo          Memo     @relation(fields: [memoId], references: [id], onDelete: Cascade)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@index([memoId])
+  id             String   @id @default(cuid())
+  memoId         String
+  sectionKey     String   // "team", "traction", "risks", etc.
+  generatedText  String   @db.Text
+  editedText     String?  @db.Text
+  approved       Boolean  @default(false)
+  editor         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  memo           Memo     @relation(fields: [memoId], references: [id])
+  citations      Citation[]
 }
 
 model FollowupQuestion {
@@ -323,44 +318,44 @@ model FollowupQuestion {
   group     FollowupGroup
   question  String        @db.Text
   rationale String?       @db.Text
-  deal      Deal          @relation(fields: [dealId], references: [id])
   createdAt DateTime      @default(now())
+  deal      Deal          @relation(fields: [dealId], references: [id])
 }
 
 model DiligenceCheck {
-  id         String      @id @default(cuid())
-  dealId     String
-  category   String
-  itemKey    String
-  status     CheckStatus @default(missing)
-  confidence Float?
-  rationale  String?     @db.Text
-  deal       Deal        @relation(fields: [dealId], references: [id])
-  citations  Citation[]
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  id          String      @id @default(cuid())
+  dealId      String
+  category    String
+  item        String
+  status      CheckStatus @default(missing)
+  confidence  Float?      // 0.0 to 1.0
+  rationale   String?     @db.Text
+  computedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deal        Deal        @relation(fields: [dealId], references: [id])
 
   @@index([dealId, category, status])
 }
 
 model Citation {
-  id               String             @id @default(cuid())
-  sourceKind       CitationSourceKind
-  sourceId         String
-  excerpt          String             @db.Text
-  pageLabel        String?
-  sectionLabel     String?
-  messageId        String?
-  memoSectionId    String?
-  diligenceCheckId String?
-  documentChunkId  String?
-  webChunkId       String?
-  message          Message?        @relation(fields: [messageId], references: [id])
-  memoSection      MemoSection?    @relation(fields: [memoSectionId], references: [id])
-  diligenceCheck   DiligenceCheck? @relation(fields: [diligenceCheckId], references: [id])
-  documentChunk    DocumentChunk?  @relation(fields: [documentChunkId], references: [id])
-  webChunk         WebChunk?       @relation(fields: [webChunkId], references: [id])
-  createdAt        DateTime        @default(now())
+  id              String             @id @default(cuid())
+  sourceKind      CitationSourceKind
+  documentChunkId String?
+  webChunkId      String?
+  documentId      String?
+  pageNumber      Int?
+  sectionLabel    String?
+  excerpt         String             @db.Text
+  // Relations to where this citation is used
+  messageId       String?
+  memoSectionId   String?
+  createdAt       DateTime           @default(now())
+  documentChunk   DocumentChunk?     @relation(fields: [documentChunkId], references: [id])
+  webChunk        WebChunk?          @relation(fields: [webChunkId], references: [id])
+  document        Document?          @relation(fields: [documentId], references: [id])
+  message         Message?           @relation(fields: [messageId], references: [id])
+  memoSection     MemoSection?       @relation(fields: [memoSectionId], references: [id])
 }
 
 model Job {
@@ -370,13 +365,13 @@ model Job {
   type        JobType
   status      JobStatus @default(queued)
   attempts    Int       @default(0)
-  errorMsg    String?
+  error       String?   @db.Text
   startedAt   DateTime?
   completedAt DateTime?
-  deal        Deal      @relation(fields: [dealId], references: [id])
-  document    Document? @relation(fields: [documentId], references: [id])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  deal        Deal      @relation(fields: [dealId], references: [id])
+  document    Document? @relation(fields: [documentId], references: [id])
 
   @@index([dealId, type, status])
 }
@@ -385,12 +380,12 @@ model UsageEvent {
   id             String       @id @default(cuid())
   organizationId String
   dealId         String?
-  eventType      String
-  quantity       Int
+  eventType      String       // "tokens_in", "tokens_out", "embedding", "upload", "export", etc.
+  quantity       Int          @default(1)
   metadata       Json?
+  createdAt      DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id])
   deal           Deal?        @relation(fields: [dealId], references: [id])
-  createdAt      DateTime     @default(now())
 
   @@index([organizationId, createdAt])
 }
