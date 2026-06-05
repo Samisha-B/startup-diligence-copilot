@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -303,17 +303,18 @@ model Memo {
 }
 
 model MemoSection {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   memoId        String
-  sectionKey    String
-  generatedText String    @db.Text
-  editedText    String?   @db.Text
-  approved      Boolean   @default(false)
+  sectionKey    String   // e.g. "team", "traction", "risks"
+  generatedText String   @db.Text
+  editedText    String?  @db.Text
+  approved      Boolean  @default(false)
   editorId      String?
-  memo          Memo      @relation(fields: [memoId], references: [id])
-  citations     Citation[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  memo          Memo     @relation(fields: [memoId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([memoId])
 }
 
 model FollowupQuestion {
