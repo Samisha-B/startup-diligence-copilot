@@ -4,6 +4,17 @@ import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { limits } from "@/lib/config/product-mode";
 import { ingestDocument } from "@/lib/documents/process-document";
+import type { DocumentType } from "@prisma/client";
+
+const allowedDocumentTypes: DocumentType[] = [
+  "pdf",
+  "docx",
+  "txt",
+  "pptx",
+  "xlsx",
+  "csv",
+  "other",
+];
 
 export async function POST(
   req: NextRequest,
@@ -60,20 +71,22 @@ export async function POST(
     );
   }
 
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "other";
+  const ext = (file.name.split(".").pop()?.toLowerCase() ?? "other") as string;
 
-  if (!limits.supportedFileTypes.includes(ext as any)) {
+  if (!allowedDocumentTypes.includes(ext as DocumentType)) {
     return NextResponse.json(
       { error: `Unsupported file type: .${ext}` },
       { status: 400 }
     );
   }
 
+  const docType = ext as DocumentType;
+
   const doc = await prisma.document.create({
     data: {
       dealId,
-      fileName: file.name,
-      type: ext as any,
+      name: file.name,
+      type: docType,
       status: "uploaded",
       sizeBytes: file.size,
     },
