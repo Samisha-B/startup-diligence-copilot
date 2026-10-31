@@ -11,14 +11,17 @@ import {
 } from "../benchmarks/loader"
 import type { ApplicationInput } from "./schema"
 import { buildQuestions, type Finding, type InvestorQuestion } from "./questions"
+import { checkDocuments, type DocFact } from "./documents-check"
 
 const State = Annotation.Root({
   application: Annotation<ApplicationInput>(),
+  documentFacts: Annotation<DocFact[]>(),
   peers: Annotation<Peer[]>(),
   usedFullSet: Annotation<boolean>(),
   stats: Annotation<PeerStats | null>(),
   exactMatch: Annotation<Peer | null>(),
   findings: Annotation<Finding[]>(),
+  docQuestions: Annotation<InvestorQuestion[]>(),
   questions: Annotation<InvestorQuestion[]>(),
 })
 
@@ -104,22 +107,31 @@ async function checkClaims(state: S): Promise<Partial<S>> {
   return { findings }
 }
 
+async function checkDocs(state: S): Promise<Partial<S>> {
+  const res = checkDocuments(state.application, state.findings, state.documentFacts ?? [])
+  return { findings: res.findings, docQuestions: res.questions }
+}
+
 async function generateQuestions(state: S): Promise<Partial<S>> {
-  return { questions: buildQuestions(state.application, state.findings) }
+  const rank = { high: 0, medium: 1, low: 2 }
+  const all = [...(state.docQuestions ?? []), ...buildQuestions(state.application, state.findings)]
+  return { questions: all.sort((a, b) => rank[a.priority] - rank[b.priority]) }
 }
 
 const graph = new StateGraph(State)
   .addNode("find_peers", findPeers)
   .addNode("check_claims", checkClaims)
+  .addNode("check_documents", checkDocs)
   .addNode("generate_questions", generateQuestions)
   .addEdge(START, "find_peers")
   .addEdge("find_peers", "check_claims")
-  .addEdge("check_claims", "generate_questions")
+  .addEdge("check_claims", "check_documents")
+  .addEdge("check_documents", "generate_questions")
   .addEdge("generate_questions", END)
   .compile()
 
-export async function runDiligenceGraph(application: ApplicationInput) {
-  const out = await graph.invoke({ application })
+export async function runDiligenceGraph(application: ApplicationInput, documentFacts: DocFact[] = []) {
+  const out = await graph.invoke({ application, documentFacts })
   return {
     findings: out.findings,
     questions: out.questions,

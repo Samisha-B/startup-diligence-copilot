@@ -1,0 +1,19 @@
+// Append this model to the END of prisma/schema.prisma, then run:
+//   npx prisma migrate dev --name application_documents
+//   npx prisma generate
+
+model ApplicationDocument {
+  id            String   @id @default(cuid())
+  applicationId String
+  name          String
+  mimeType      String
+  sizeBytes     Int
+  status        String   @default("processing") // processing | done | failed
+  method        String?  // text | pdf-text | ocr-vision
+  extractedText String?  @db.Text
+  facts         Json?
+  error         String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  @@index([applicationId])
+}
