@@ -20,6 +20,8 @@ const FIELDS: { name: string; label: string; type?: string; required?: boolean; 
   { name: "monthlyGrowthPct", label: "Monthly growth % (optional)", type: "number" },
 ]
 
+const INPUT = "w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/30 focus:border-[#c9a861] focus:outline-none"
+
 export default function ApplyForm() {
   const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle")
   const [error, setError] = useState("")
@@ -44,33 +46,35 @@ export default function ApplyForm() {
     }
   }
 
-  if (state === "done") return <p className="rounded border p-4">Thanks! Your application has been submitted.</p>
+  if (state === "done") {
+    return <p className="rounded-xl border border-[#c9a861]/30 bg-[#c9a861]/10 p-4 text-[#f3ddb0]">Thanks! Your application has been submitted.</p>
+  }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {FIELDS.map((f) => (
         <label key={f.name} className="block text-sm">
-          <span className="mb-1 block font-medium">{f.label}</span>
-          <input name={f.name} type={f.type ?? "text"} required={f.required} step="any" placeholder={f.hint} className="w-full rounded border px-3 py-2" />
+          <span className="mb-1 block font-medium text-white/80">{f.label}</span>
+          <input name={f.name} type={f.type ?? "text"} required={f.required} step="any" placeholder={f.hint} className={INPUT} />
         </label>
       ))}
       <label className="block text-sm">
-        <span className="mb-1 block font-medium">Employees</span>
-        <select name="employeeBand" required className="w-full rounded border px-3 py-2">
-          {BANDS.map((b) => (<option key={b}>{b}</option>))}
+        <span className="mb-1 block font-medium text-white/80">Employees</span>
+        <select name="employeeBand" required className={INPUT}>
+          {BANDS.map((b) => (<option key={b} className="bg-[#0a0a0b]">{b}</option>))}
         </select>
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block font-medium">What does your company do?</span>
-        <textarea name="description" required minLength={10} rows={4} className="w-full rounded border px-3 py-2" />
+        <span className="mb-1 block font-medium text-white/80">What does your company do?</span>
+        <textarea name="description" required minLength={10} rows={4} className={INPUT} />
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block font-medium">Other claims (awards, pilots, partnerships)</span>
-        <textarea name="otherClaims" rows={3} className="w-full rounded border px-3 py-2" />
+        <span className="mb-1 block font-medium text-white/80">Other claims (awards, pilots, partnerships)</span>
+        <textarea name="otherClaims" rows={3} className={INPUT} />
       </label>
-      {state === "error" && <p className="text-sm text-red-600">{error}</p>}
-      <button disabled={state === "sending"} className="rounded bg-black px-4 py-2 text-white disabled:opacity-50">
-        {state === "sending" ? "Submitting..." : "Submit application"}
+      {state === "error" && <p className="text-sm text-red-400">{error}</p>}
+      <button disabled={state === "sending"} className="rounded-full bg-[#c9a861] px-6 py-2.5 text-sm font-medium text-black transition hover:bg-[#e6d6b2] disabled:opacity-50">
+        {state === "sending" ? "Submitting and verifying..." : "Submit application"}
       </button>
     </form>
   )

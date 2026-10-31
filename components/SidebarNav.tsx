@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "New Deal", href: "/deals/new" },
+  { label: "Applications", href: "/applications" },
 ];
 
 const comingSoon = ["Uploads", "Investment Memo"];
@@ -37,6 +38,16 @@ export default function SidebarNav() {
           </a>
         );
       })}
+
+      <a
+        href="/apply"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-between rounded-xl border border-dashed border-[#c9a861]/30 px-4 py-3 text-sm font-medium text-[#f3ddb0] transition hover:bg-[#c9a861]/10"
+      >
+        <span>Founder application form</span>
+        <span className="text-sm text-[#c9a861]">↗</span>
+      </a>
 
       {comingSoon.map((label) => (
         <div
