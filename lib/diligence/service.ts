@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "../prisma"
 import { runDiligenceGraph } from "./graph"
+import { buildCoverage } from "./coverage"
 import type { ApplicationInput } from "./schema"
 import type { DocFact } from "./documents-check"
 import type { DocFacts } from "./facts"
@@ -32,6 +33,7 @@ export async function processApplication(id: string) {
     otherClaims: app.otherClaims ?? undefined,
   }
   const result = await runDiligenceGraph(input, documentFacts)
+  const coverage = buildCoverage(input, result.findings, documentFacts)
   await prisma.$transaction([
     prisma.applicationQuestion.deleteMany({ where: { applicationId: id } }),
     prisma.applicationQuestion.createMany({
@@ -43,6 +45,7 @@ export async function processApplication(id: string) {
         status: "verified",
         analysis: {
           findings: result.findings,
+          coverage,
           stats: result.stats,
           usedFullSet: result.usedFullSet,
           matchedCompany: result.matchedCompany,
