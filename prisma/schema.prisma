@@ -387,3 +387,48 @@ model UsageEvent {
 
   @@index([organizationId, createdAt])
 }
+// Paste these two models at the bottom of prisma/schema.prisma, then run:
+//   npx prisma migrate dev --name startup_applications
+// (Kept as a separate file because the full schema file was not rewritten in this commit, to avoid clobbering your edits.)
+
+model StartupApplication {
+  id               String   @id @default(cuid())
+  contactEmail     String
+  companyName      String
+  website          String?
+  city             String
+  foundedYear      Int
+  founders         String
+  industries       String[]
+  description      String   @db.Text
+  employeeBand     String
+  fundingRaisedUsd Float
+  fundingRounds    Int
+  investorCount    Int
+  annualRevenueUsd Float?
+  customerCount    Int?
+  monthlyGrowthPct Float?
+  otherClaims      String?  @db.Text
+  status           String   @default("submitted")
+  analysis         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  questions        ApplicationQuestion[]
+
+  @@index([createdAt])
+}
+
+model ApplicationQuestion {
+  id            String   @id @default(cuid())
+  applicationId String
+  topic         String
+  question      String   @db.Text
+  rationale     String?  @db.Text
+  priority      String   // high | medium | low
+  asked         Boolean  @default(false)
+  answer        String?  @db.Text
+  createdAt     DateTime @default(now())
+  application   StartupApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, priority])
+}
